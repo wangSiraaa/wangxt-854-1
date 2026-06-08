@@ -1,0 +1,201 @@
+{
+  "description": "垃圾分类督导积分 API 服务 - 复核派单样例数据",
+  "seed_date": "2026-06-08",
+  "version": "1.1.0",
+  "users": [
+    {
+      "id": 1,
+      "username": "admin1",
+      "name": "社区管理员",
+      "role": "admin",
+      "community": "阳光社区"
+    },
+    {
+      "id": 2,
+      "username": "super1",
+      "name": "李督导",
+      "role": "supervisor",
+      "community": "阳光社区"
+    },
+    {
+      "id": 3,
+      "username": "super2",
+      "name": "王督导",
+      "role": "supervisor",
+      "community": "阳光社区"
+    },
+    {
+      "id": 4,
+      "username": "user1",
+      "name": "张居民",
+      "role": "resident",
+      "community": "阳光社区"
+    },
+    {
+      "id": 5,
+      "username": "user2",
+      "name": "刘居民",
+      "role": "resident",
+      "community": "阳光社区"
+    },
+    {
+      "id": 6,
+      "username": "user3",
+      "name": "陈居民",
+      "role": "resident",
+      "community": "阳光社区"
+    }
+  ],
+  "delivery_records": [
+    {
+      "case": "success_normal",
+      "description": "正常扫码登记 - 分类正确",
+      "qr_code": "QR-854-SUCCESS-001",
+      "resident_id": 4,
+      "supervisor_id": 2,
+      "garbage_type": "kitchen",
+      "weight": 2.5,
+      "is_mixed": false,
+      "mixed_description": null,
+      "expected_points": 25.0,
+      "expected_status": "success"
+    },
+    {
+      "case": "failure_mixed",
+      "description": "扫码登记失败 - 检测到混投，扣分并生成整改",
+      "qr_code": "QR-854-MIXED-001",
+      "resident_id": 5,
+      "supervisor_id": 2,
+      "garbage_type": "kitchen",
+      "weight": 3.0,
+      "is_mixed": true,
+      "mixed_description": "混有可回收塑料瓶和有害电池",
+      "expected_points": -20.0,
+      "expected_status": "failure",
+      "auto_assign_review": true,
+      "reviewer_id": 3
+    },
+    {
+      "case": "failure_mixed_no_review",
+      "description": "扫码登记失败 - 检测到混投，不自动派单",
+      "qr_code": "QR-854-MIXED-002",
+      "resident_id": 6,
+      "supervisor_id": 3,
+      "garbage_type": "recyclable",
+      "weight": 1.5,
+      "is_mixed": true,
+      "mixed_description": "混有厨余垃圾",
+      "expected_points": -20.0,
+      "expected_status": "failure",
+      "auto_assign_review": false
+    },
+    {
+      "case": "success_recyclable",
+      "description": "正常扫码登记 - 可回收物",
+      "qr_code": "QR-854-SUCCESS-002",
+      "resident_id": 4,
+      "supervisor_id": 2,
+      "garbage_type": "recyclable",
+      "weight": 4.0,
+      "is_mixed": false,
+      "mixed_description": null,
+      "expected_points": 60.0,
+      "expected_status": "success"
+    },
+    {
+      "case": "failure_duplicate",
+      "description": "扫码登记失败 - 重复扫码",
+      "qr_code": "QR-854-DUPLICATE-001",
+      "resident_id": 5,
+      "supervisor_id": 2,
+      "garbage_type": "other",
+      "weight": 1.0,
+      "is_mixed": false,
+      "mixed_description": null,
+      "expected_points": 5.0,
+      "expected_status": "success_first",
+      "note": "第一次扫码成功，第二次扫码应返回重复错误"
+    },
+    {
+      "case": "failure_invalid_type",
+      "description": "扫码登记失败 - 无效垃圾类型",
+      "qr_code": "QR-854-INVALID-001",
+      "resident_id": 4,
+      "supervisor_id": 2,
+      "garbage_type": "invalid_type",
+      "weight": 2.0,
+      "is_mixed": false,
+      "mixed_description": null,
+      "expected_points": 0.0,
+      "expected_status": "failure",
+      "error_code": "INVALID_GARBAGE_TYPE"
+    },
+    {
+      "case": "failure_invalid_weight",
+      "description": "扫码登记失败 - 无效重量",
+      "qr_code": "QR-854-INVALID-002",
+      "resident_id": 4,
+      "supervisor_id": 2,
+      "garbage_type": "kitchen",
+      "weight": 0.0,
+      "is_mixed": false,
+      "mixed_description": null,
+      "expected_points": 0.0,
+      "expected_status": "failure",
+      "error_code": "INVALID_WEIGHT"
+    }
+  ],
+  "review_assignments": [
+    {
+      "case": "manual_assign",
+      "description": "手动创建复核派单",
+      "delivery_record_case": "failure_mixed",
+      "resident_id": 5,
+      "reviewer_id": 3,
+      "assigner_id": 1,
+      "expected_status": "pending"
+    },
+    {
+      "case": "review_pass",
+      "description": "复核通过",
+      "assignment_id": 1,
+      "review_result": "pass",
+      "review_note": "经核实，确实存在混投行为，维持原判"
+    },
+    {
+      "case": "review_reject",
+      "description": "复核驳回",
+      "assignment_id": 2,
+      "review_result": "reject",
+      "review_note": "经监控录像核实，分类正确，督导员误判"
+    }
+  ],
+  "error_codes": {
+    "DUPLICATE_QR": "该投放记录已登记，请勿重复扫码",
+    "RESIDENT_NOT_FOUND": "居民用户不存在",
+    "SUPERVISOR_NOT_FOUND": "督导员用户不存在",
+    "INVALID_SUPERVISOR": "该用户无督导员权限",
+    "INVALID_GARBAGE_TYPE": "无效的垃圾类型",
+    "INVALID_WEIGHT": "垃圾重量必须大于0",
+    "MIXED_DELIVERY": "检测到混投行为，已扣除积分并生成整改通知"
+  },
+  "garbage_types": {
+    "kitchen": {
+      "name": "厨余垃圾",
+      "points_per_kg": 10
+    },
+    "recyclable": {
+      "name": "可回收物",
+      "points_per_kg": 15
+    },
+    "harmful": {
+      "name": "有害垃圾",
+      "points_per_kg": 20
+    },
+    "other": {
+      "name": "其他垃圾",
+      "points_per_kg": 5
+    }
+  },
+  "mixed_deduction": 20
+}

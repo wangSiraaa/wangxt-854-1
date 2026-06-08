@@ -1,14 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import delivery, points, rectification, resident, user
+from app.routers import delivery, points, rectification, resident, user, review
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="垃圾分类督导积分 API 服务",
-    description="垃圾分类督导积分管理系统，支持扫码登记、分类判定、积分流水、整改通知、申诉处理等功能",
-    version="1.0.0",
+    description="垃圾分类督导积分管理系统，支持扫码登记、分类判定、积分流水、整改通知、申诉处理、复核派单等功能",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -24,6 +24,7 @@ app.include_router(delivery.router)
 app.include_router(points.router)
 app.include_router(rectification.router)
 app.include_router(resident.router)
+app.include_router(review.router)
 
 
 @app.get("/", summary="健康检查")

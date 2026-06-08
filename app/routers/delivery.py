@@ -5,6 +5,8 @@ from app.schemas import (
     ScanDeliveryRequest,
     DeliveryRecordResponse,
     ClassificationResult,
+    ScanDeliveryWithReviewRequest,
+    ReviewAssignmentResponse,
 )
 from app.services import DeliveryService, ClassificationService
 from typing import Optional
@@ -16,25 +18,64 @@ router = APIRouter(prefix="/api/delivery", tags=["投放登记"])
 async def scan_delivery(request: ScanDeliveryRequest, db: Session = Depends(get_db)):
     result = DeliveryService.scan_and_register(db, request)
 
-    if result.get("is_duplicate"):
-        existing = result["existing_record"]
+    if result.get("is_failure"):
+        if result.get("is_duplicate"):
+            existing = result["existing_record"]
+            return {
+                "code": 400,
+                "message": result["message"],
+                "data": {
+                    "is_failure": True,
+                    "error_code": result.get("error_code"),
+                    "is_duplicate": True,
+                    "is_mixed": False,
+                    "existing_record": DeliveryRecordResponse.model_validate(existing),
+                },
+            }
+
+        if result.get("is_mixed"):
+            return {
+                "code": 400,
+                "message": result["message"],
+                "data": {
+                    "is_failure": True,
+                    "error_code": "MIXED_DELIVERY",
+                    "is_duplicate": False,
+                    "is_mixed": True,
+                    "delivery_record": DeliveryRecordResponse.model_validate(
+                        result["delivery_record"]
+                    ),
+                    "classification_result": result["classification_result"],
+                    "points_change": {
+                        "old_balance": result["old_balance"],
+                        "new_balance": result["new_balance"],
+                        "points": result["points_record"].points,
+                        "type": result["points_record"].type,
+                    },
+                    "rectification": result["rectification"].id if result["rectification"] else None,
+                    "review_assignment": ReviewAssignmentResponse.model_validate(result["review_assignment"])
+                    if result.get("review_assignment") else None,
+                },
+            }
+
         return {
             "code": 400,
             "message": result["message"],
             "data": {
-                "is_duplicate": True,
-                "existing_record": DeliveryRecordResponse.model_validate(existing),
+                "is_failure": True,
+                "error_code": result.get("error_code"),
+                "is_duplicate": False,
+                "is_mixed": False,
             },
         }
-
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["message"])
 
     return {
         "code": 200,
         "message": result["message"],
         "data": {
+            "is_failure": False,
             "is_duplicate": False,
+            "is_mixed": False,
             "delivery_record": DeliveryRecordResponse.model_validate(
                 result["delivery_record"]
             ),
@@ -45,7 +86,105 @@ async def scan_delivery(request: ScanDeliveryRequest, db: Session = Depends(get_
                 "points": result["points_record"].points,
                 "type": result["points_record"].type,
             },
-            "rectification": result["rectification"].id if result["rectification"] else None,
+            "rectification": None,
+            "review_assignment": None,
+        },
+    }
+
+
+@router.post("/scan-with-review", summary="扫码登记并自动派单复核")
+async def scan_delivery_with_review(
+    request: ScanDeliveryWithReviewRequest, db: Session = Depends(get_db)
+):
+    base_request = ScanDeliveryRequest(
+        qr_code=request.qr_code,
+        resident_id=request.resident_id,
+        supervisor_id=request.supervisor_id,
+        garbage_type=request.garbage_type,
+        weight=request.weight,
+        is_mixed=request.is_mixed,
+        mixed_description=request.mixed_description,
+    )
+
+    result = DeliveryService.scan_and_register(
+        db,
+        base_request,
+        auto_assign_review=request.auto_assign_review,
+        reviewer_id=request.reviewer_id,
+    )
+
+    if result.get("is_failure"):
+        if result.get("is_duplicate"):
+            existing = result["existing_record"]
+            return {
+                "code": 400,
+                "message": result["message"],
+                "data": {
+                    "is_failure": True,
+                    "error_code": result.get("error_code"),
+                    "is_duplicate": True,
+                    "is_mixed": False,
+                    "existing_record": DeliveryRecordResponse.model_validate(existing),
+                },
+            }
+
+        if result.get("is_mixed"):
+            return {
+                "code": 400,
+                "message": result["message"],
+                "data": {
+                    "is_failure": True,
+                    "error_code": "MIXED_DELIVERY",
+                    "is_duplicate": False,
+                    "is_mixed": True,
+                    "delivery_record": DeliveryRecordResponse.model_validate(
+                        result["delivery_record"]
+                    ),
+                    "classification_result": result["classification_result"],
+                    "points_change": {
+                        "old_balance": result["old_balance"],
+                        "new_balance": result["new_balance"],
+                        "points": result["points_record"].points,
+                        "type": result["points_record"].type,
+                    },
+                    "rectification": result["rectification"].id if result["rectification"] else None,
+                    "review_assignment": ReviewAssignmentResponse.model_validate(result["review_assignment"])
+                    if result.get("review_assignment") else None,
+                    "business_no": result["review_assignment"].business_no
+                    if result.get("review_assignment") else None,
+                },
+            }
+
+        return {
+            "code": 400,
+            "message": result["message"],
+            "data": {
+                "is_failure": True,
+                "error_code": result.get("error_code"),
+                "is_duplicate": False,
+                "is_mixed": False,
+            },
+        }
+
+    return {
+        "code": 200,
+        "message": result["message"],
+        "data": {
+            "is_failure": False,
+            "is_duplicate": False,
+            "is_mixed": False,
+            "delivery_record": DeliveryRecordResponse.model_validate(
+                result["delivery_record"]
+            ),
+            "classification_result": result["classification_result"],
+            "points_change": {
+                "old_balance": result["old_balance"],
+                "new_balance": result["new_balance"],
+                "points": result["points_record"].points,
+                "type": result["points_record"].type,
+            },
+            "rectification": None,
+            "review_assignment": None,
         },
     }
 

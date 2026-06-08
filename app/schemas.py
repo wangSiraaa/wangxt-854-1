@@ -187,3 +187,60 @@ class PaginatedResponse(BaseModel):
     page: int
     page_size: int
     data: List
+
+
+class ReviewAssignmentBase(BaseModel):
+    delivery_record_id: int
+    reviewer_id: int
+
+
+class ReviewAssignmentCreate(ReviewAssignmentBase):
+    assigner_id: int
+    resident_id: int
+
+
+class ReviewAssignmentReview(BaseModel):
+    review_result: str
+    review_note: Optional[str] = None
+
+
+class ReviewAssignmentResponse(BaseModel):
+    id: int
+    delivery_record_id: int
+    resident_id: int
+    reviewer_id: int
+    assigner_id: int
+    status: str
+    review_result: Optional[str]
+    review_note: Optional[str]
+    business_no: str
+    assigned_at: datetime
+    reviewed_at: Optional[datetime]
+    created_at: datetime
+    resident: UserSimpleResponse
+    reviewer: UserSimpleResponse
+    assigner: UserSimpleResponse
+    delivery_record: DeliveryRecordResponse
+
+    class Config:
+        from_attributes = True
+
+
+class ReviewAssignmentQuery(BaseModel):
+    reviewer_id: Optional[int] = None
+    resident_id: Optional[int] = None
+    status: Optional[str] = None
+    page: int = 1
+    page_size: int = 20
+
+
+class ScanDeliveryWithReviewRequest(BaseModel):
+    qr_code: str
+    resident_id: int
+    supervisor_id: int
+    garbage_type: str
+    weight: float
+    is_mixed: bool = False
+    mixed_description: Optional[str] = None
+    auto_assign_review: bool = False
+    reviewer_id: Optional[int] = None

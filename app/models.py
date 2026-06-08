@@ -42,6 +42,29 @@ class DeliveryRecord(Base):
     supervisor = relationship("User", foreign_keys=[supervisor_id])
     points_record = relationship("PointsRecord", back_populates="delivery_record", uselist=False)
     rectification = relationship("RectificationNotice", back_populates="delivery_record", uselist=False)
+    review_assignment = relationship("ReviewAssignment", back_populates="delivery_record", uselist=False)
+
+
+class ReviewAssignment(Base):
+    __tablename__ = "review_assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    delivery_record_id = Column(Integer, ForeignKey("delivery_records.id"), nullable=False)
+    resident_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    assigner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String(20), default="pending")
+    review_result = Column(String(20))
+    review_note = Column(Text)
+    business_no = Column(String(50), unique=True, index=True, nullable=False)
+    assigned_at = Column(DateTime, default=datetime.now)
+    reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.now)
+
+    delivery_record = relationship("DeliveryRecord", back_populates="review_assignment")
+    resident = relationship("User", foreign_keys=[resident_id])
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+    assigner = relationship("User", foreign_keys=[assigner_id])
 
 
 class PointsRecord(Base):

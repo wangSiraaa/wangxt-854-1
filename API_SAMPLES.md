@@ -296,6 +296,165 @@ curl "http://localhost:8000/api/resident/4/appeals"
 
 ---
 
+## 6. 复核派单
+
+### 6.1 创建复核派单
+```bash
+curl -X POST "http://localhost:8000/api/review/assignments" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "delivery_record_id": 1,
+    "resident_id": 4,
+    "reviewer_id": 3,
+    "assigner_id": 1
+  }'
+```
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "message": "复核派单创建成功",
+  "data": {
+    "review_assignment": {
+      "id": 1,
+      "delivery_record_id": 1,
+      "resident_id": 4,
+      "reviewer_id": 3,
+      "assigner_id": 1,
+      "status": "pending",
+      "review_result": null,
+      "review_note": null,
+      "business_no": "REV202606081612560A16948E",
+      "assigned_at": "2026-06-08T16:12:56",
+      "reviewed_at": null,
+      "created_at": "2026-06-08T16:12:56",
+      "resident": {...},
+      "reviewer": {...},
+      "assigner": {...},
+      "delivery_record": {...}
+    },
+    "business_no": "REV202606081612560A16948E"
+  }
+}
+```
+
+### 6.2 查询复核派单列表
+```bash
+# 全部派单
+curl "http://localhost:8000/api/review/assignments"
+
+# 按复核人筛选
+curl "http://localhost:8000/api/review/assignments?reviewer_id=3"
+
+# 按状态筛选
+curl "http://localhost:8000/api/review/assignments?pending"
+
+# 分页
+curl "http://localhost:8000/api/review/assignments?page=1&page_size=10"
+```
+
+### 6.3 查询复核派单详情
+```bash
+# 按ID查询
+curl "http://localhost:8000/api/review/assignments/1"
+
+# 按业务编号查询
+curl "http://localhost:8000/api/review/assignments/business-no/REV202606081612560A16948E"
+```
+
+### 6.4 复核处理
+```bash
+curl -X PUT "http://localhost:8000/api/review/assignments/1/review" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "review_result": "pass",
+    "review_note": "经核实，确实存在混投行为，维持原判"
+  }'
+```
+
+**复核结果说明:**
+- `pass`: 复核通过，维持原处罚
+- `reject`: 复核驳回，原分类判定有误
+
+### 6.5 查询复核人待处理数量
+```bash
+curl "http://localhost:8000/api/review/assignments/reviewer/3/pending-count"
+```
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "message": "查询成功",
+  "data": {
+    "reviewer_id": 3,
+    "pending_count": 5
+  }
+}
+```
+
+### 6.6 扫码登记并自动派单复核
+```bash
+curl -X POST "http://localhost:8000/api/delivery/scan-with-review" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "qr_code": "QR-854-MIXED-001",
+    "resident_id": 5,
+    "supervisor_id": 2,
+    "garbage_type": "kitchen",
+    "weight": 3.0,
+    "is_mixed": true,
+    "mixed_description": "混有可回收塑料瓶和有害电池",
+    "auto_assign_review": true,
+    "reviewer_id": 3
+  }'
+```
+
+**混投失败分支响应示例 (code=400):**
+```json
+{
+  "code": 400,
+  "message": "登记完成，检测到混投行为，已扣除积分并生成整改通知",
+  "data": {
+    "is_failure": true,
+    "error_code": "MIXED_DELIVERY",
+    "is_duplicate": false,
+    "is_mixed": true,
+    "delivery_record": {...},
+    "classification_result": {
+      "is_correct": false,
+      "garbage_type": "kitchen",
+      "confidence": 0.95,
+      "suggestion": "请将不同类型的垃圾分开投放"
+    },
+    "points_change": {
+      "old_balance": 100.0,
+      "new_balance": 80.0,
+      "points": -20.0,
+      "type": "deduct"
+    },
+    "rectification": 1,
+    "review_assignment": {...},
+    "business_no": "REV202606081612560A16948E"
+  }
+}
+```
+
+### 6.7 失败分支错误码说明
+
+| 错误码 | 说明 | HTTP状态码 |
+|--------|------|-----------|
+| `DUPLICATE_QR` | 该投放记录已登记，请勿重复扫码 | 400 |
+| `RESIDENT_NOT_FOUND` | 居民用户不存在 | 400 |
+| `SUPERVISOR_NOT_FOUND` | 督导员用户不存在 | 400 |
+| `INVALID_SUPERVISOR` | 该用户无督导员权限 | 400 |
+| `INVALID_GARBAGE_TYPE` | 无效的垃圾类型 | 400 |
+| `INVALID_WEIGHT` | 垃圾重量必须大于0 | 400 |
+| `MIXED_DELIVERY` | 检测到混投行为，已扣除积分并生成整改通知 | 400 |
+
+---
+
 ## 用户角色说明
 
 | 角色代码 | 名称 | 权限 |

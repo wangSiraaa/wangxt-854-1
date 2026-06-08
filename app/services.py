@@ -1,13 +1,17 @@
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional
-from app.models import User, DeliveryRecord, PointsRecord, RectificationNotice, Appeal
+import uuid
+from app.models import User, DeliveryRecord, PointsRecord, RectificationNotice, Appeal, ReviewAssignment
 from app.schemas import (
     ScanDeliveryRequest,
     ClassificationResult,
     RectificationNoticeCreate,
     AppealCreate,
     PointsRecordQuery,
+    ReviewAssignmentCreate,
+    ReviewAssignmentQuery,
+    ReviewAssignmentReview,
 )
 
 
@@ -57,14 +61,67 @@ class DeliveryService:
         return db.query(DeliveryRecord).filter(DeliveryRecord.qr_code == qr_code).first()
 
     @staticmethod
-    def scan_and_register(db: Session, request: ScanDeliveryRequest) -> dict:
+    def validate_scan_request(db: Session, request: ScanDeliveryRequest) -> dict:
         existing_record = DeliveryService.check_duplicate_qr_code(db, request.qr_code)
         if existing_record:
             return {
-                "success": False,
+                "valid": False,
+                "error_code": "DUPLICATE_QR",
                 "message": "该投放记录已登记，请勿重复扫码",
                 "existing_record": existing_record,
-                "is_duplicate": True,
+            }
+
+        resident = db.query(User).filter(User.id == request.resident_id).first()
+        if not resident:
+            return {
+                "valid": False,
+                "error_code": "RESIDENT_NOT_FOUND",
+                "message": "居民用户不存在",
+            }
+
+        supervisor = db.query(User).filter(User.id == request.supervisor_id).first()
+        if not supervisor:
+            return {
+                "valid": False,
+                "error_code": "SUPERVISOR_NOT_FOUND",
+                "message": "督导员用户不存在",
+            }
+
+        if supervisor.role != "supervisor" and supervisor.role != "admin":
+            return {
+                "valid": False,
+                "error_code": "INVALID_SUPERVISOR",
+                "message": "该用户无督导员权限",
+            }
+
+        if request.garbage_type not in GARBAGE_TYPES:
+            return {
+                "valid": False,
+                "error_code": "INVALID_GARBAGE_TYPE",
+                "message": f"无效的垃圾类型: {request.garbage_type}",
+            }
+
+        if request.weight <= 0:
+            return {
+                "valid": False,
+                "error_code": "INVALID_WEIGHT",
+                "message": "垃圾重量必须大于0",
+            }
+
+        return {"valid": True}
+
+    @staticmethod
+    def scan_and_register(db: Session, request: ScanDeliveryRequest, auto_assign_review: bool = False, reviewer_id: Optional[int] = None) -> dict:
+        validation_result = DeliveryService.validate_scan_request(db, request)
+        if not validation_result["valid"]:
+            return {
+                "success": False,
+                "is_failure": True,
+                "is_duplicate": validation_result.get("error_code") == "DUPLICATE_QR",
+                "error_code": validation_result.get("error_code"),
+                "message": validation_result["message"],
+                "existing_record": validation_result.get("existing_record"),
+                "is_mixed": False,
             }
 
         classification_result = ClassificationService.classify_garbage_type(
@@ -90,10 +147,6 @@ class DeliveryService:
         db.flush()
 
         resident = db.query(User).filter(User.id == request.resident_id).first()
-        if not resident:
-            db.rollback()
-            return {"success": False, "message": "居民用户不存在"}
-
         old_balance = resident.balance
         resident.balance = round(old_balance + points, 2)
 
@@ -110,6 +163,7 @@ class DeliveryService:
         db.add(points_record)
 
         rectification = None
+        review_assignment = None
         if request.is_mixed:
             rectification = RectificationNotice(
                 delivery_record_id=delivery_record.id,
@@ -123,17 +177,30 @@ class DeliveryService:
             )
             db.add(rectification)
 
+            if auto_assign_review and reviewer_id:
+                review_create = ReviewAssignmentCreate(
+                    delivery_record_id=delivery_record.id,
+                    resident_id=request.resident_id,
+                    reviewer_id=reviewer_id,
+                    assigner_id=request.supervisor_id,
+                )
+                review_result = ReviewService.create_assignment(db, review_create)
+                review_assignment = review_result.get("review_assignment")
+
         db.commit()
         db.refresh(delivery_record)
 
         result = {
-            "success": True,
-            "message": "登记成功",
+            "success": not request.is_mixed,
+            "is_failure": request.is_mixed,
+            "message": "登记成功，分类正确" if not request.is_mixed else "登记完成，检测到混投行为，已扣除积分并生成整改通知",
             "is_duplicate": False,
+            "is_mixed": request.is_mixed,
             "delivery_record": delivery_record,
             "classification_result": classification_result,
             "points_record": points_record,
             "rectification": rectification,
+            "review_assignment": review_assignment,
             "old_balance": old_balance,
             "new_balance": resident.balance,
         }
@@ -354,3 +421,142 @@ class AppealService:
         if status:
             q = q.filter(Appeal.status == status)
         return q.order_by(Appeal.created_at.desc()).all()
+
+
+class ReviewService:
+    @staticmethod
+    def generate_business_no() -> str:
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        random_str = uuid.uuid4().hex[:8].upper()
+        return f"REV{timestamp}{random_str}"
+
+    @staticmethod
+    def create_assignment(db: Session, request: ReviewAssignmentCreate) -> dict:
+        existing = db.query(ReviewAssignment).filter(
+            ReviewAssignment.delivery_record_id == request.delivery_record_id
+        ).first()
+        if existing:
+            return {
+                "success": False,
+                "message": "该投放记录已存在复核派单",
+                "review_assignment": existing,
+            }
+
+        delivery_record = db.query(DeliveryRecord).filter(
+            DeliveryRecord.id == request.delivery_record_id
+        ).first()
+        if not delivery_record:
+            return {
+                "success": False,
+                "message": "投放记录不存在",
+            }
+
+        reviewer = db.query(User).filter(User.id == request.reviewer_id).first()
+        if not reviewer:
+            return {
+                "success": False,
+                "message": "复核人不存在",
+            }
+
+        if reviewer.role not in ["supervisor", "admin"]:
+            return {
+                "success": False,
+                "message": "该用户无复核权限",
+            }
+
+        business_no = ReviewService.generate_business_no()
+        review_assignment = ReviewAssignment(
+            delivery_record_id=request.delivery_record_id,
+            resident_id=request.resident_id,
+            reviewer_id=request.reviewer_id,
+            assigner_id=request.assigner_id,
+            business_no=business_no,
+            status="pending",
+        )
+        db.add(review_assignment)
+        db.commit()
+        db.refresh(review_assignment)
+
+        return {
+            "success": True,
+            "message": "复核派单创建成功",
+            "review_assignment": review_assignment,
+            "business_no": business_no,
+        }
+
+    @staticmethod
+    def get_assignment(db: Session, assignment_id: int) -> Optional[ReviewAssignment]:
+        return db.query(ReviewAssignment).filter(ReviewAssignment.id == assignment_id).first()
+
+    @staticmethod
+    def get_assignment_by_business_no(db: Session, business_no: str) -> Optional[ReviewAssignment]:
+        return db.query(ReviewAssignment).filter(ReviewAssignment.business_no == business_no).first()
+
+    @staticmethod
+    def get_assignments(db: Session, query: ReviewAssignmentQuery) -> dict:
+        q = db.query(ReviewAssignment)
+
+        if query.reviewer_id:
+            q = q.filter(ReviewAssignment.reviewer_id == query.reviewer_id)
+        if query.resident_id:
+            q = q.filter(ReviewAssignment.resident_id == query.resident_id)
+        if query.status:
+            q = q.filter(ReviewAssignment.status == query.status)
+
+        total = q.count()
+        assignments = (
+            q.order_by(ReviewAssignment.created_at.desc())
+            .offset((query.page - 1) * query.page_size)
+            .limit(query.page_size)
+            .all()
+        )
+
+        return {
+            "total": total,
+            "page": query.page,
+            "page_size": query.page_size,
+            "data": assignments,
+        }
+
+    @staticmethod
+    def review_assignment(
+        db: Session, assignment_id: int, request: ReviewAssignmentReview
+    ) -> Optional[dict]:
+        assignment = db.query(ReviewAssignment).filter(
+            ReviewAssignment.id == assignment_id
+        ).first()
+        if not assignment:
+            return None
+
+        if assignment.status != "pending":
+            return {
+                "success": False,
+                "message": "该复核派单已处理，不可重复复核",
+            }
+
+        assignment.status = "reviewed"
+        assignment.review_result = request.review_result
+        assignment.review_note = request.review_note
+        assignment.reviewed_at = datetime.now()
+
+        result_data = {
+            "success": True,
+            "message": "复核完成",
+            "assignment": assignment,
+        }
+
+        if request.review_result == "pass":
+            pass
+        elif request.review_result == "reject":
+            pass
+
+        db.commit()
+        db.refresh(assignment)
+        return result_data
+
+    @staticmethod
+    def get_pending_count(db: Session, reviewer_id: int) -> int:
+        return db.query(ReviewAssignment).filter(
+            ReviewAssignment.reviewer_id == reviewer_id,
+            ReviewAssignment.status == "pending",
+        ).count()
